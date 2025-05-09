@@ -64,6 +64,7 @@ def close_connection(exc):
 # Static uploads
 # ────────────────────────────────────────────
 UPLOAD_FOLDER = os.path.join(os.getcwd(), "static", "images")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
