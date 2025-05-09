@@ -3,9 +3,12 @@ import sqlite3
 import uuid
 import json
 from flask import Flask, g, request, jsonify, render_template, flash, redirect, url_for, session
+from flask_cors import CORS  # ← import 추가
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-key")
+CORS(app)  # ← Flask 앱 전체에 CORS 허용
 
 # ────────────────────────────────────────────
 # Config
@@ -86,6 +89,22 @@ def add_friend():
     cur.execute("INSERT OR IGNORE INTO friends VALUES (?,?)", (friend, me))
     get_db().commit()
     return jsonify({"ok": True})
+
+@app.route("/admin/delete", methods=["POST"])    
+def delete_image():
+    data = request.get_json()
+    file_type = data.get("file_type")
+    filename = data.get("filename")
+        if not (file_type and filename):
+        return jsonify({"error": "필수 정보 누락"}), 400
+
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], file_type, filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return jsonify({"ok": True, "message": f"{filename} 삭제 완료"})
+    else:
+        return jsonify({"error": "파일 없음"}), 404
+
 
 @app.route("/api/friends/<user_id>", methods=["GET"])
 def list_friends(user_id):
