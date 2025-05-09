@@ -160,9 +160,12 @@ def admin_upload():
         max_id = 0
         for fname in os.listdir(app.config['UPLOAD_FOLDER']):
             if allowed_file(fname):
-                meta = parse_filename(fname)
-                if meta and meta['unique_id'].isdigit():
-                    max_id = max(max_id, int(meta['unique_id']))
+                try:
+                    meta = parse_filename(fname)
+                    if meta and meta['unique_id'].isdigit():
+                        max_id = max(max_id, int(meta['unique_id']))
+                except Exception as e:
+                    print(f"[⚠️] max_id 계산 중 오류 발생: {fname} → {e}")
         new_filename = f"{custom_filename}{max_id + 1}.{ext}"
         file_type = request.form.get('file_type', '')
         dest_folder = os.path.join(app.config['UPLOAD_FOLDER'], file_type)
