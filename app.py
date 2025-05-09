@@ -95,7 +95,8 @@ def delete_image():
     data = request.get_json()
     file_type = data.get("file_type")
     filename = data.get("filename")
-        if not (file_type and filename):
+
+    if not (file_type and filename):
         return jsonify({"error": "필수 정보 누락"}), 400
 
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], file_type, filename)
