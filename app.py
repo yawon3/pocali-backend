@@ -15,7 +15,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="None"
 )
 
-DATABASE = "/data/user_data.db"
+DATABASE = os.path.join(os.getcwd(), "user_data.db")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "default_admin_pass")
 
 # ────────────────────────────────────────────
