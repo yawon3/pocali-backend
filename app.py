@@ -2,9 +2,19 @@ import os
 import sqlite3
 import uuid
 import json
+import os
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 from flask import Flask, g, request, jsonify, render_template, flash, redirect, url_for, session
 from flask_cors import CORS  # ← import 추가
 
+cloudinary.config(
+    cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key    = os.getenv("CLOUDINARY_API_KEY"),
+    api_secret = os.getenv("CLOUDINARY_API_SECRET"),
+    secure     = True
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-key")
@@ -99,12 +109,12 @@ def delete_image():
     if not (file_type and filename):
         return jsonify({"error": "필수 정보 누락"}), 400
 
-    filepath = os.path.join(app.config["UPLOAD_FOLDER"], file_type, filename)
-    if os.path.exists(filepath):
-        os.remove(filepath)
-        return jsonify({"ok": True, "message": f"{filename} 삭제 완료"})
-    else:
-        return jsonify({"error": "파일 없음"}), 404
+        public_id = f"{file_type}/{filename}"
+        resp = cloudinary.uploader.destroy(public_id)
+        # resp.get("result") == "ok" 이면 삭제 성공
+        if resp.get("result") == "ok":
+            return jsonify({"ok": True, "message": f"{filename} 삭제 완료"})
+        return jsonify({"error": "삭제 실패"}), 400
 
 
 @app.route("/api/friends/<user_id>", methods=["GET"])
@@ -168,33 +178,35 @@ def admin_login():
 @app.route('/admin/upload', methods=['GET', 'POST'])
 def admin_upload():
     if request.method == 'POST':
-        if 'file' not in request.files or 'custom_filename' not in request.form:
+        # 필수 파라미터 체크
+        if 'file' not in request.files or 'file_type' not in request.form:
             flash('필수 항목이 누락되었습니다.')
             return redirect(request.url)
+
         file = request.files['file']
-        custom_filename = request.form['custom_filename'].strip()
+        file_type = request.form['file_type'].strip()
+
+        # 확장자 검증
         if file.filename == '' or not allowed_file(file.filename):
             flash('유효하지 않은 파일입니다.')
             return redirect(request.url)
-        ext = file.filename.rsplit('.', 1)[1].lower()
-        # 고유번호 계산
-        max_id = 0
-        for fname in os.listdir(app.config['UPLOAD_FOLDER']):
-            if allowed_file(fname):
-                try:
-                    meta = parse_filename(fname)
-                    if meta and meta['unique_id'].isdigit():
-                        max_id = max(max_id, int(meta['unique_id']))
-                except Exception as e:
-                    print(f"[⚠️] max_id 계산 중 오류 발생: {fname} → {e}")
-        new_filename = f"{custom_filename}{max_id + 1}.{ext}"
-        file_type = request.form.get('file_type', '')
-        dest_folder = os.path.join(app.config['UPLOAD_FOLDER'], file_type)
-        os.makedirs(dest_folder, exist_ok=True)
-        file.save(os.path.join(dest_folder, new_filename))
-        flash(f"업로드 성공: {new_filename}")
+
+        # Cloudinary에 업로드
+        try:
+            res = cloudinary.uploader.upload(
+                file,
+                folder=file_type
+            )
+        except Exception as e:
+            flash(f'업로드 중 오류 발생: {e}')
+            return redirect(request.url)
+
+        flash(f"업로드 성공: {res['public_id']}")
         return redirect(url_for('admin_upload'))
+
+    # GET 요청 시 관리자 업로드 폼 렌더링
     return render_template('admin_upload.html')
+
 
 # ────────────────────────────────────────────
 # 메인 페이지
@@ -256,16 +268,18 @@ def parse_filename(filename: str):
 
 @app.route("/api/images")
 def get_images():
-    result = []
-    for root, _, files in os.walk(app.config['UPLOAD_FOLDER']):
-        rel_folder = os.path.relpath(root, app.config['UPLOAD_FOLDER'])
-        for fname in files:
-            if not allowed_file(fname): continue
-            meta = parse_filename(fname)
-            if not meta: continue
-            meta['sub_category'] = rel_folder if rel_folder != '.' else ''
-            result.append(meta)
-    return jsonify(result)
+        # Cloudinary에서 업로드된 리소스 리스트 가져오기
+        data = cloudinary.api.resources(type='upload')
+        images = []
+        for item in data.get("resources", []):
+            file_type, filename = item["public_id"].split("/", 1)
+            images.append({
+                "group":   item["public_id"],       # 필요한 메타만 추출
+                "file_type": file_type,
+                "filename":  filename,
+                "url":       item["secure_url"]
+            })
+        return jsonify({"images": images})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
