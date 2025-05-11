@@ -175,39 +175,34 @@ def admin_login():
         flash('잘못된 비밀번호입니다.')
     return render_template('admin_login.html')
 
-@app.route('/admin/upload', methods=['GET', 'POST'])
-def admin_upload():
-    if request.method == 'POST':
-        # 1) 파일과 file_type만 있으면 동작하도록 custom_filename 체크 제거
-        file = request.files.get('file')
-        file_type = request.form.get('file_type', '').strip()
-        if not file or not file_type:
-            flash('파일 또는 분류(file_type)가 누락되었습니다.')
-            return redirect(request.url)
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    # 1) 파일 & file_type 검증
+    file = request.files.get('file')
+    file_type = request.form.get('file_type', '').strip()
+    if not file or not file_type:
+        return jsonify({"error":"file or file_type missing"}), 400
 
-        # 2) 확장자 분리
-        orig_name, ext = os.path.splitext(file.filename)
-        # ext에는 '.jpg' 같은 형태로 들어있습니다
+    # 2) 원본 이름으로 public_id 설정
+    name, _ = os.path.splitext(file.filename)
+    public_id = f"{file_type}/{name}"
 
-        # 3) public_id 명시: "폴더/원본파일명" (확장자 제외)
-        public_id = f"{file_type}/{orig_name}"
+    try:
+        res = cloudinary.uploader.upload(
+            file,
+            public_id=public_id,
+            overwrite=True,
+            resource_type='image'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        try:
-            res = cloudinary.uploader.upload(
-                file,
-                public_id=public_id,
-                overwrite=True,       # 덮어쓰기
-                resource_type='image' # 이미지 리소스로 처리
-            )
-        except Exception as e:
-            flash(f'업로드 중 오류 발생: {e}')
-            return redirect(request.url)
-
-        # 4) flash 메시지에 확장자 포함하여 보여주기
-        flash(f"업로드 성공: {res['public_id']}.{res['format']}")
-        return redirect(url_for('admin_upload'))
-
-    return render_template('admin_upload.html')
+    # 3) JSON으로 성공 리턴
+    return jsonify({
+        "public_id": res["public_id"],
+        "format":    res["format"],
+        "url":       res["secure_url"]
+    }), 200
 
 # ────────────────────────────────────────────
 # 메인 페이지
@@ -269,18 +264,42 @@ def parse_filename(filename: str):
 
 @app.route("/api/images")
 def get_images():
-        # Cloudinary에서 업로드된 리소스 리스트 가져오기
-        data = cloudinary.api.resources(type='upload')
-        images = []
-        for item in data.get("resources", []):
-            file_type, filename = item["public_id"].split("/", 1)
+    # 한 번에 최대 500개씩 가져옴
+    resp = cloudinary.api.resources(type='upload', max_results=500)
+
+    images = []
+    # 첫 페이지 리소스 수집
+    for r in resp.get("resources", []):
+        file_type, name = r["public_id"].split("/", 1)
+        ext = r.get("format", "jpg")
+        filename = f"{name}.{ext}"
+        images.append({
+            "file_type": file_type,
+            "filename":  filename,
+            "url":       r["secure_url"]
+        })
+
+    # 추가 페이징이 있으면 모두 가져와서 합산
+    while resp.get("next_cursor"):
+        resp = cloudinary.api.resources(
+            type='upload',
+            max_results=500,
+            next_cursor=resp["next_cursor"]
+        )
+        for r in resp.get("resources", []):
+            file_type, name = r["public_id"].split("/", 1)
+            ext = r.get("format", "jpg")
+            filename = f"{name}.{ext}"
             images.append({
-                "group":   item["public_id"],       # 필요한 메타만 추출
                 "file_type": file_type,
                 "filename":  filename,
-                "url":       item["secure_url"]
+                "url":       r["secure_url"]
             })
-        return jsonify({"images": images})
+
+    # 필요에 따라 정렬
+    images.sort(key=lambda x: int(x.get("unique_id", 0)), reverse=True)
+    return jsonify({"images": images})
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
