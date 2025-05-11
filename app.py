@@ -193,10 +193,13 @@ def admin_upload():
 
         # Cloudinary에 업로드
         try:
-            res = cloudinary.uploader.upload(
-                file,
-                folder=file_type
-            )
+             res = cloudinary.uploader.upload(
+                 file,
+                folder=file_type,     # 업로드할 폴더
+                use_filename=True,    # 원본 파일명을 public_id로 사용
+                unique_filename=False,# 랜덤접미사 붙이지 않음
+                overwrite=True        # 같은 이름이면 덮어쓰기
+             )
         except Exception as e:
             flash(f'업로드 중 오류 발생: {e}')
             return redirect(request.url)
