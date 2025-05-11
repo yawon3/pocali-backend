@@ -178,38 +178,36 @@ def admin_login():
 @app.route('/admin/upload', methods=['GET', 'POST'])
 def admin_upload():
     if request.method == 'POST':
-        # 필수 파라미터 체크
-        if 'file' not in request.files or 'file_type' not in request.form:
-            flash('필수 항목이 누락되었습니다.')
+        # 1) 파일과 file_type만 있으면 동작하도록 custom_filename 체크 제거
+        file = request.files.get('file')
+        file_type = request.form.get('file_type', '').strip()
+        if not file or not file_type:
+            flash('파일 또는 분류(file_type)가 누락되었습니다.')
             return redirect(request.url)
 
-        file = request.files['file']
-        file_type = request.form['file_type'].strip()
+        # 2) 확장자 분리
+        orig_name, ext = os.path.splitext(file.filename)
+        # ext에는 '.jpg' 같은 형태로 들어있습니다
 
-        # 확장자 검증
-        if file.filename == '' or not allowed_file(file.filename):
-            flash('유효하지 않은 파일입니다.')
-            return redirect(request.url)
+        # 3) public_id 명시: "폴더/원본파일명" (확장자 제외)
+        public_id = f"{file_type}/{orig_name}"
 
-        # Cloudinary에 업로드
         try:
-             res = cloudinary.uploader.upload(
-                 file,
-                folder=file_type,     # 업로드할 폴더
-                use_filename=True,    # 원본 파일명을 public_id로 사용
-                unique_filename=False,# 랜덤접미사 붙이지 않음
-                overwrite=True        # 같은 이름이면 덮어쓰기
-             )
+            res = cloudinary.uploader.upload(
+                file,
+                public_id=public_id,
+                overwrite=True,       # 덮어쓰기
+                resource_type='image' # 이미지 리소스로 처리
+            )
         except Exception as e:
             flash(f'업로드 중 오류 발생: {e}')
             return redirect(request.url)
 
-        flash(f"업로드 성공: {res['public_id']}")
+        # 4) flash 메시지에 확장자 포함하여 보여주기
+        flash(f"업로드 성공: {res['public_id']}.{res['format']}")
         return redirect(url_for('admin_upload'))
 
-    # GET 요청 시 관리자 업로드 폼 렌더링
     return render_template('admin_upload.html')
-
 
 # ────────────────────────────────────────────
 # 메인 페이지
