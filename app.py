@@ -266,25 +266,28 @@ def parse_filename(filename: str):
 # Entrypoint
 # ────────────────────────────────────────────
 
-
 @app.route("/api/images")
 def get_images():
-    # 한 번에 최대 500개씩 가져옴
     resp = cloudinary.api.resources(type='upload', max_results=500)
-
     images = []
-    # 첫 페이지 리소스 수집
+
+    # 1차 페이지 리소스
     for r in resp.get("resources", []):
         file_type, name = r["public_id"].split("/", 1)
-        ext = r.get("format", "jpg")
+        ext      = r.get("format", "jpg")
         filename = f"{name}.{ext}"
-        images.append({
+
+        # ★ 여기: 파일명 파싱 결과를 meta에 담고…
+        meta = parse_filename(filename) or {}
+        meta.update({
             "file_type": file_type,
             "filename":  filename,
             "url":       r["secure_url"]
         })
 
-    # 추가 페이징이 있으면 모두 가져와서 합산
+        images.append(meta)
+
+    # 다음 페이지가 있으면 모두 합칩니다
     while resp.get("next_cursor"):
         resp = cloudinary.api.resources(
             type='upload',
@@ -293,17 +296,25 @@ def get_images():
         )
         for r in resp.get("resources", []):
             file_type, name = r["public_id"].split("/", 1)
-            ext = r.get("format", "jpg")
+            ext      = r.get("format", "jpg")
             filename = f"{name}.{ext}"
-            images.append({
+
+            meta = parse_filename(filename) or {}
+            meta.update({
                 "file_type": file_type,
                 "filename":  filename,
                 "url":       r["secure_url"]
             })
+            images.append(meta)
 
-    # 필요에 따라 정렬
+    # unique_id 기준 내림차순 정렬
     images.sort(key=lambda x: int(x.get("unique_id", 0)), reverse=True)
-    return jsonify({"images": images})
+
+    # images 배열만 내려주는 게 front에서 더 쓰기 편하다면…
+    return jsonify(images)
+    # 만약 { images: [...] } 형태를 유지하려면,
+    # return jsonify({ "images": images })
+
 
 
 if __name__ == '__main__':
