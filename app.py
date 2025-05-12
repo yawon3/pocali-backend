@@ -210,25 +210,30 @@ def api_upload():
 
 @app.route('/')
 def index():
-    image_data = []
-    for root, _, files in os.walk(app.config['UPLOAD_FOLDER']):
-        rel_folder = os.path.relpath(root, app.config['UPLOAD_FOLDER'])
-        for filename in files:
-            if not allowed_file(filename):
-                continue
-            meta = parse_filename(filename)
-            if not meta:
-                continue
-            file_type = rel_folder if rel_folder != '.' else ''
-            meta['type'] = file_type
-            meta['url'] = url_for('static', filename=f"images/{file_type}/{filename}" if file_type else f"images/{filename}")
-            try:
-                meta['unique_numeric'] = int(meta['unique_id'])
-            except ValueError:
-                meta['unique_numeric'] = 0
-            image_data.append(meta)
-    image_data.sort(key=lambda x: x['unique_numeric'], reverse=True)
-    return render_template('index.html', images=image_data)
+    # 클라우디너리에서 한 번에 최대 500개 가져오기
+    resp = cloudinary.api.resources(type='upload', max_results=500)
+
+    images = []
+    for r in resp.get('resources', []):
+        # public_id 예: "album/IVE_AN_3rdFC_SCOUTJP_351545"
+        file_type, name = r['public_id'].split('/', 1)
+        ext = r.get('format', 'jpg')
+        filename = f"{name}.{ext}"
+
+        # parse_filename 로 group, member, category, title, version, unique_id 뽑기
+        meta = parse_filename(filename) or {}
+        meta.update({
+            'file_type': file_type,
+            'filename':  filename,
+            'url':       r['secure_url']
+        })
+        images.append(meta)
+
+    # unique_id 를 수치로 정렬 (내림차순)
+    images.sort(key=lambda x: int(x.get('unique_id', 0)), reverse=True)
+
+    # 원래 index.html에 넘겨주던 다른 컨텍스트(name, 설정 등)가 있으면 함께 넘겨주세요
+    return render_template('index.html', images=images)
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
