@@ -310,16 +310,8 @@ def get_images():
     # unique_id 기준 내림차순 정렬
     images.sort(key=lambda x: int(x.get("unique_id", 0)), reverse=True)
 
-    # ── 여기에 페이징 로직 추가 ─────────────────
-    # 요청 파라미터로 page, limit 을 받아서
-    # page=0&limit=50 이면 images[0:50], page=1&limit=50 이면 images[50:100]
-    page  = request.args.get("page",  default=0,  type=int)
-    limit = request.args.get("limit", default=50, type=int)
-    start = page * limit
-    end   = start + limit
-    resp = jsonify(images[start:end])
-    resp.headers["X-Total-Count"] = str(len(images))
-    return resp
+    # images 배열만 내려주는 게 front에서 더 쓰기 편하다면…
+    return jsonify(images)
     # 만약 { images: [...] } 형태를 유지하려면,
     # return jsonify({ "images": images })
 
