@@ -9,12 +9,41 @@ import cloudinary.api
 from flask import Flask, g, request, jsonify, render_template, flash, redirect, url_for, session
 from flask_cors import CORS  # ← import 추가
 
+# Firebase 관련 import 추가
+import firebase_admin
+from firebase_admin import credentials, db as firebase_db
+
 cloudinary.config(
     cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key    = os.getenv("CLOUDINARY_API_KEY"),
     api_secret = os.getenv("CLOUDINARY_API_SECRET"),
     secure     = True
 )
+
+# Firebase 초기화 (환경변수로 처리)
+def init_firebase():
+    if not firebase_admin._apps:  # 중복 초기화 방지
+        try:
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": "pocali",
+                "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+                "private_key": os.getenv("FIREBASE_PRIVATE_KEY").replace('\\n', '\n'),
+                "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token"
+            })
+            
+            firebase_admin.initialize_app(cred, {
+                'databaseURL': "https://pocali-default-rtdb.asia-southeast1.firebasedatabase.app/"
+            })
+            print("Firebase 초기화 성공")
+        except Exception as e:
+            print(f"Firebase 초기화 실패: {e}")
+
+# Firebase 초기화 실행
+init_firebase()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-key")
@@ -32,7 +61,7 @@ DATABASE = os.path.join(os.getcwd(), "user_data.db")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "default_admin_pass")
 
 # ────────────────────────────────────────────
-# DB helpers
+# DB helpers (SQLite 백업용으로 유지)
 # ────────────────────────────────────────────
 
 def get_db():
@@ -85,20 +114,34 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # ────────────────────────────────────────────
-# Friend API
+# Friend API (Firebase로 변경)
 # ────────────────────────────────────────────
 
 @app.route("/api/friends", methods=["POST"])
 def add_friend():
     data = request.get_json(silent=True) or {}
-    me = data.get("me"); friend = data.get("friend")
+    me = data.get("me")
+    friend = data.get("friend")
+    
     if not (me and friend):
         return jsonify({"error": "uuid missing"}), 400
-    cur = get_db().cursor()
-    cur.execute("INSERT OR IGNORE INTO friends VALUES (?,?)", (me, friend))
-    cur.execute("INSERT OR IGNORE INTO friends VALUES (?,?)", (friend, me))
-    get_db().commit()
-    return jsonify({"ok": True})
+    
+    try:
+        # Firebase에 친구 관계 저장
+        ref = firebase_db.reference('friends')
+        ref.child(me).child(friend).set(True)
+        ref.child(friend).child(me).set(True)
+        
+        # SQLite에도 백업 (기존 로직 유지)
+        cur = get_db().cursor()
+        cur.execute("INSERT OR IGNORE INTO friends VALUES (?,?)", (me, friend))
+        cur.execute("INSERT OR IGNORE INTO friends VALUES (?,?)", (friend, me))
+        get_db().commit()
+        
+        return jsonify({"ok": True})
+    except Exception as e:
+        print(f"친구 추가 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/admin/delete", methods=["POST"])    
 def delete_image():
@@ -109,53 +152,111 @@ def delete_image():
     if not (file_type and filename):
         return jsonify({"error": "필수 정보 누락"}), 400
 
-        public_id = f"{file_type}/{filename}"
-        resp = cloudinary.uploader.destroy(public_id)
-        # resp.get("result") == "ok" 이면 삭제 성공
-        if resp.get("result") == "ok":
-            return jsonify({"ok": True, "message": f"{filename} 삭제 완료"})
-        return jsonify({"error": "삭제 실패"}), 400
-
+    public_id = f"{file_type}/{filename}"
+    resp = cloudinary.uploader.destroy(public_id)
+    # resp.get("result") == "ok" 이면 삭제 성공
+    if resp.get("result") == "ok":
+        return jsonify({"ok": True, "message": f"{filename} 삭제 완료"})
+    return jsonify({"error": "삭제 실패"}), 400
 
 @app.route("/api/friends/<user_id>", methods=["GET"])
 def list_friends(user_id):
-    cur = get_db().cursor()
-    cur.execute("SELECT friend_id FROM friends WHERE user_id = ?", (user_id,))
-    return jsonify([row[0] for row in cur.fetchall()])
+    try:
+        # Firebase에서 친구 목록 가져오기
+        ref = firebase_db.reference(f'friends/{user_id}')
+        friends_data = ref.get() or {}
+        friend_list = list(friends_data.keys())
+        return jsonify(friend_list)
+    except Exception as e:
+        # Firebase 실패시 SQLite 백업 사용
+        print(f"Firebase 친구목록 오류, SQLite 사용: {e}")
+        cur = get_db().cursor()
+        cur.execute("SELECT friend_id FROM friends WHERE user_id = ?", (user_id,))
+        return jsonify([row[0] for row in cur.fetchall()])
 
 @app.route("/api/friend/<friend_id>/collection", methods=["GET"])
 def friend_collection(friend_id):
-    cur = get_db().cursor()
-    cur.execute("SELECT data FROM user_data WHERE user_id = ?", (friend_id,))
-    row = cur.fetchone()
-    return jsonify({"data": json.loads(row[0]) if row else {}})
+    try:
+        # Firebase에서 친구 컬렉션 가져오기
+        ref = firebase_db.reference(f'users/{friend_id}')
+        data = ref.get() or {}
+        return jsonify({"data": data})
+    except Exception as e:
+        # Firebase 실패시 SQLite 백업 사용
+        print(f"Firebase 컬렉션 오류, SQLite 사용: {e}")
+        cur = get_db().cursor()
+        cur.execute("SELECT data FROM user_data WHERE user_id = ?", (friend_id,))
+        row = cur.fetchone()
+        return jsonify({"data": json.loads(row[0]) if row else {}})
 
 # ────────────────────────────────────────────
-# User data API (단일 엔드포인트 GET/POST)
+# User data API (Firebase로 변경)
 # ────────────────────────────────────────────
 
 @app.route("/api/user/<uid>", methods=["GET", "POST"])
 def user_data(uid):
-    cur = get_db().cursor()
-    if request.method == "GET":
-        cur.execute("SELECT data FROM user_data WHERE user_id = ?", (uid,))
-        row = cur.fetchone()
-        return jsonify({"user_id": uid, "data": row[0] if row else "{}"})
-    # POST – update
-    new_data = request.json.get("data")
-    cur.execute(
-        "INSERT INTO user_data (user_id, data) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data",
-        (uid, json.dumps(new_data)),
-    )
-    get_db().commit()
-    return jsonify({"ok": True})
+    try:
+        ref = firebase_db.reference(f'users/{uid}')
+        
+        if request.method == "GET":
+            # Firebase에서 데이터 가져오기
+            data = ref.get() or {}
+            return jsonify({"user_id": uid, "data": json.dumps(data)})
+        
+        # POST - update
+        new_data = request.json.get("data")
+        
+        # Firebase에 저장
+        ref.set(new_data)
+        
+        # SQLite에도 백업
+        cur = get_db().cursor()
+        cur.execute(
+            "INSERT INTO user_data (user_id, data) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data",
+            (uid, json.dumps(new_data)),
+        )
+        get_db().commit()
+        
+        return jsonify({"ok": True})
+        
+    except Exception as e:
+        print(f"Firebase 사용자 데이터 오류: {e}")
+        # Firebase 실패시 SQLite만 사용
+        cur = get_db().cursor()
+        if request.method == "GET":
+            cur.execute("SELECT data FROM user_data WHERE user_id = ?", (uid,))
+            row = cur.fetchone()
+            return jsonify({"user_id": uid, "data": row[0] if row else "{}"})
+        else:
+            new_data = request.json.get("data")
+            cur.execute(
+                "INSERT INTO user_data (user_id, data) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data",
+                (uid, json.dumps(new_data)),
+            )
+            get_db().commit()
+            return jsonify({"ok": True})
 
 @app.route("/api/register", methods=["POST"])
 def register():
     new_uuid = str(uuid.uuid4())
-    cur = get_db().cursor()
-    cur.execute("INSERT INTO user_data (user_id, data) VALUES (?, '{}')", (new_uuid,))
-    get_db().commit()
+    
+    try:
+        # Firebase에 새 사용자 등록
+        ref = firebase_db.reference(f'users/{new_uuid}')
+        ref.set({})
+        
+        # SQLite에도 백업
+        cur = get_db().cursor()
+        cur.execute("INSERT INTO user_data (user_id, data) VALUES (?, '{}')", (new_uuid,))
+        get_db().commit()
+        
+    except Exception as e:
+        print(f"Firebase 사용자 등록 오류, SQLite만 사용: {e}")
+        # Firebase 실패시 SQLite만 사용
+        cur = get_db().cursor()
+        cur.execute("INSERT INTO user_data (user_id, data) VALUES (?, '{}')", (new_uuid,))
+        get_db().commit()
+    
     resp = jsonify({"user_id": new_uuid})
     resp.set_cookie("myUUID", new_uuid, max_age=31536000, httponly=True, secure=True, samesite="None")
     return resp
@@ -314,8 +415,6 @@ def get_images():
     return jsonify(images)
     # 만약 { images: [...] } 형태를 유지하려면,
     # return jsonify({ "images": images })
-
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
