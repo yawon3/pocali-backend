@@ -1,3 +1,4 @@
 flask
 Flask-Cors
 cloudinary
+firebase-admin==6.5.0
