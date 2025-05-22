@@ -242,8 +242,15 @@ def get_images():
                 continue
                 
             try:
-                # file_type과 filename 분리
-                file_type, filename = blob.name.split('/', 1)
+                # images/ 폴더 제거하고 실제 경로 추출
+                _, full_path = blob.name.split('/', 1)
+                
+                # 실제 file_type과 filename 분리
+                if '/' in full_path:
+                    file_type, filename = full_path.split('/', 1)
+                else:
+                    file_type = "unknown"
+                    filename = full_path
             except ValueError:
                 file_type = "unknown"
                 filename = blob.name
@@ -251,8 +258,8 @@ def get_images():
             # 파일명 파싱 결과를 meta에 담음
             meta = parse_filename(filename) or {}
             meta.update({
-                "file_type": file_type,
-                "filename": filename,
+                "file_type": file_type,  # 이제 "event"가 됨
+                "filename": full_path,   # "event/IVE_AN_ARENA_351631.jpg"
                 "url": blob.public_url
             })
             
@@ -282,8 +289,15 @@ def index():
                 continue
                 
             try:
-                # file_type과 filename 분리
-                file_type, filename = blob.name.split('/', 1)
+                # images/ 폴더 제거하고 실제 경로 추출
+                _, full_path = blob.name.split('/', 1)
+                
+                # 실제 file_type과 filename 분리
+                if '/' in full_path:
+                    file_type, filename = full_path.split('/', 1)
+                else:
+                    file_type = "unknown"
+                    filename = full_path
             except ValueError:
                 file_type = "unknown"
                 filename = blob.name
@@ -291,8 +305,8 @@ def index():
             # 파일명 파싱 결과를 meta에 담음
             meta = parse_filename(filename) or {}
             meta.update({
-                "file_type": file_type,
-                "filename": filename,
+                "file_type": file_type,  # 이제 "event"가 됨
+                "filename": full_path,   # "event/IVE_AN_ARENA_351631.jpg"
                 "url": blob.public_url
             })
             
