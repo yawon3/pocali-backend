@@ -80,6 +80,14 @@ def init_db():
                    PRIMARY KEY (user_id, friend_id)
                )"""
         )
+        # 3) 사용자 잠금 상태
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS user_locks (
+                   user_id TEXT PRIMARY KEY,
+                   locked  BOOLEAN DEFAULT FALSE,
+                   locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+               )"""
+        )
         get_db().commit()
 
 @app.before_request
@@ -93,6 +101,89 @@ def close_connection(exc):
     db = getattr(g, "_database", None)
     if db is not None:
         db.close()
+
+# ────────────────────────────────────────────
+# UUID 잠금 기능 추가
+# ────────────────────────────────────────────
+
+def is_user_locked(user_id):
+    """사용자 잠금 상태 확인"""
+    try:
+        # Firebase에서 먼저 확인
+        ref = firebase_db.reference(f'user_locks/{user_id}')
+        lock_status = ref.get()
+        if lock_status is not None:
+            return bool(lock_status)
+        
+        # Firebase에 없으면 SQLite에서 확인
+        cur = get_db().cursor()
+        cur.execute("SELECT locked FROM user_locks WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        return bool(row[0]) if row else False
+    except Exception as e:
+        print(f"잠금 상태 확인 오류: {e}")
+        return False
+
+def set_user_lock(user_id, locked):
+    """사용자 잠금 상태 설정"""
+    try:
+        # Firebase에 저장
+        ref = firebase_db.reference(f'user_locks/{user_id}')
+        ref.set(locked)
+        
+        # SQLite에도 백업
+        cur = get_db().cursor()
+        cur.execute(
+            "INSERT INTO user_locks (user_id, locked) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET locked = excluded.locked, locked_at = CURRENT_TIMESTAMP",
+            (user_id, locked)
+        )
+        get_db().commit()
+        return True
+    except Exception as e:
+        print(f"잠금 상태 설정 오류: {e}")
+        return False
+
+@app.route("/api/user/<uid>/toggle-lock", methods=["POST"])
+def toggle_user_lock(uid):
+    """사용자 잠금 상태 토글"""
+    try:
+        data = request.get_json() or {}
+        current_user = data.get('current_user')
+        
+        # 본인만 잠금 설정 가능
+        if current_user != uid:
+            return jsonify({"error": "본인만 잠금 설정이 가능합니다"}), 403
+        
+        # 현재 잠금 상태 확인
+        current_lock = is_user_locked(uid)
+        new_lock = not current_lock
+        
+        # 잠금 상태 변경
+        if set_user_lock(uid, new_lock):
+            return jsonify({
+                "success": True,
+                "locked": new_lock,
+                "message": "잠금 해제됨" if not new_lock else "잠금 설정됨"
+            })
+        else:
+            return jsonify({"error": "잠금 상태 변경 실패"}), 500
+            
+    except Exception as e:
+        print(f"잠금 토글 오류: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/user/<uid>/lock-status", methods=["GET"])
+def get_lock_status(uid):
+    """사용자 잠금 상태 조회"""
+    try:
+        locked = is_user_locked(uid)
+        return jsonify({
+            "locked": locked,
+            "user_id": uid
+        })
+    except Exception as e:
+        print(f"잠금 상태 조회 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # ────────────────────────────────────────────
 # Friend API (Firebase로 변경)
@@ -155,7 +246,7 @@ def friend_collection(friend_id):
         return jsonify({"data": json.loads(row[0]) if row else {}})
 
 # ────────────────────────────────────────────
-# User data API (Firebase로 변경)
+# User data API (Firebase로 변경 + 잠금 기능 추가)
 # ────────────────────────────────────────────
 
 @app.route("/api/user/<uid>", methods=["GET", "POST"])
@@ -164,11 +255,22 @@ def user_data(uid):
         ref = firebase_db.reference(f'users/{uid}')
         
         if request.method == "GET":
+            # 요청자 정보 확인 (쿠키에서)
+            current_user = request.cookies.get('myUUID')
+            
+            # 본인이 아닌 경우 잠금 상태 확인
+            if current_user != uid:
+                if is_user_locked(uid):
+                    return jsonify({
+                        "error": "이 사용자는 데이터를 잠갔습니다",
+                        "locked": True
+                    }), 403
+            
             # Firebase에서 데이터 가져오기
             data = ref.get() or {}
             return jsonify({"user_id": uid, "data": json.dumps(data)})
         
-        # POST - update
+        # POST - update (본인만 가능하므로 잠금 체크 불필요)
         new_data = request.json.get("data")
         
         # Firebase에 저장
@@ -189,6 +291,14 @@ def user_data(uid):
         # Firebase 실패시 SQLite만 사용
         cur = get_db().cursor()
         if request.method == "GET":
+            # 본인이 아닌 경우 잠금 상태 확인
+            current_user = request.cookies.get('myUUID')
+            if current_user != uid and is_user_locked(uid):
+                return jsonify({
+                    "error": "이 사용자는 데이터를 잠갔습니다",
+                    "locked": True
+                }), 403
+            
             cur.execute("SELECT data FROM user_data WHERE user_id = ?", (uid,))
             row = cur.fetchone()
             return jsonify({"user_id": uid, "data": row[0] if row else "{}"})
@@ -209,6 +319,9 @@ def register():
         # Firebase에 새 사용자 등록
         ref = firebase_db.reference(f'users/{new_uuid}')
         ref.set({})
+        
+        # 기본 잠금 상태 설정 (잠금 해제 상태)
+        set_user_lock(new_uuid, False)
         
         # SQLite에도 백업
         cur = get_db().cursor()
