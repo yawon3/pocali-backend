@@ -3,8 +3,13 @@ import sqlite3
 import uuid
 import json
 import os
-from flask import Flask, g, request, jsonify, render_template, redirect, url_for, session
+from flask import Flask, g, request, jsonify, render_template, redirect, url_for, session, abort
+from functools import wraps
+from werkzeug.security import check_password_hash
 from flask_cors import CORS
+
+
+
 
 # Firebase 관련 import
 import firebase_admin
@@ -19,7 +24,8 @@ CORS(app)  # Flask 앱 전체에 CORS 허용
 # ────────────────────────────────────────────
 app.config.update(
     SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_SAMESITE="None"
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax"
 )
 
 DATABASE = os.path.join(os.getcwd(), "user_data.db")
@@ -432,6 +438,48 @@ def index():
     except Exception as e:
         print(f"Firebase 이미지 조회 오류: {e}")
         return render_template('index.html', images=[])
+
+        # ────────────────────────────────────────────
+        # djemals (관리자) 로그인/보호
+        # ────────────────────────────────────────────
+
+        def djemals_required(fn):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if not session.get("is_djemals"):
+                    abort(401)
+                return fn(*args, **kwargs)
+            return wrapper
+
+        @app.get("/djemals/login")
+        def djemals_login_page():
+            return render_template("djemals_login.html")
+
+        @app.post("/djemals/login")
+        def djemals_login():
+            pw = request.form.get("password", "")
+            pw_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
+
+            if (not pw_hash) or (not check_password_hash(pw_hash, pw)):
+                return "Unauthorized", 401
+
+            session["is_djemals"] = True
+            return redirect("/djemals")
+
+        @app.post("/djemals/logout")
+        def djemals_logout():
+            session.clear()
+            return redirect("/djemals/login")
+
+        @app.get("/djemals")
+        @djemals_required
+        def djemals_home():
+            return render_template("djemals.html")
+
+        # 배포 확인용 (선택): 이거 치면 pong 떠야 함
+        @app.get("/djemals/ping")
+        def djemals_ping():
+            return "pong"
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
