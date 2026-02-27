@@ -493,7 +493,7 @@ def parse_filename(filename: str):
     if len(tokens) < 4:
         return None
     mapping = {
-        'AN': '유진', 'WON': '원영', 'GA': '가을', 'REI': '레이',
+        '_AN': '유진', 'WON': '원영', 'GA': '가을', 'REI': '레이',
         'LIZ': '리즈', 'LEE': '이서', 'II': "I've IVE", 'LD': 'LOVE DIVE'
     }
     unique_id = tokens[-1]
