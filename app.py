@@ -479,6 +479,46 @@ def djemals_home():
 def djemals_ping():
     return "pong"
 
+@app.route("/api/track", methods=["GET", "POST"])
+def track_event():
+    if request.method == "GET":
+        return jsonify({"ok": True, "message": "track route alive"}), 200
+
+    data = request.get_json() or {}
+
+    uuid = data.get("uuid")
+    event = data.get("event", "page_view")
+
+    if not uuid:
+        return jsonify({"error": "uuid required"}), 400
+
+    today = get_kst_date()
+    doc_ref = db.collection("daily_stats").document(today)
+    doc = doc_ref.get()
+
+    if doc.exists:
+        stats = doc.to_dict()
+        views = stats.get("views", 0)
+        active = stats.get("active_uuids", [])
+
+        if event == "page_view":
+            views += 1
+
+        if uuid not in active:
+            active.append(uuid)
+    else:
+        views = 1 if event == "page_view" else 0
+        active = [uuid]
+
+    doc_ref.set({
+        "views": views,
+        "active_uuids": active,
+        "active_count": len(active),
+        "updated_at": firestore.SERVER_TIMESTAMP
+    })
+
+    return jsonify({"ok": True})  
+
 @app.post("/api/track")
 def track_event():
     data = request.get_json() or {}
