@@ -479,6 +479,18 @@ def djemals_home():
 def djemals_ping():
     return "pong"
 
+    
+
+@app.get("/zzztest")
+def zzztest():
+return "zzz ok"
+
+@app.route("/api/track", methods=["GET", "POST"])
+def track_event():
+    return jsonify({"ok": True, "route": "track alive"})
+
+
+
 @app.route("/api/track", methods=["GET", "POST"])
 def track_event():
     if request.method == "GET":
