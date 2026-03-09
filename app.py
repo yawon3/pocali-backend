@@ -21,7 +21,7 @@ def get_kst_date():
     return datetime.now(kst).strftime("%Y-%m-%d")
 
 # Firestore 초기화
-db = firestore.Client()
+db = firestore.client()
 
 # ────────────────────────────────────────────
 # Config
@@ -406,17 +406,14 @@ def index():
     try:
         blobs = bucket.list_blobs()
         images = []
-        
+
         for blob in blobs:
-            # 이미지 파일인지 확인
             if not any(blob.name.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif']):
                 continue
-                
+
             try:
-                # images/ 폴더 제거하고 실제 경로 추출
                 _, full_path = blob.name.split('/', 1)
-                
-                # 실제 file_type과 filename 분리
+
                 if '/' in full_path:
                     file_type, filename = full_path.split('/', 1)
                 else:
@@ -425,102 +422,99 @@ def index():
             except ValueError:
                 file_type = "unknown"
                 filename = blob.name
-                
-            # 파일명 파싱 결과를 meta에 담음
+
             meta = parse_filename(filename) or {}
             meta.update({
-                "file_type": file_type,  # 이제 "event"가 됨
-                "filename": full_path,   # "event/IVE_AN_ARENA_351631.jpg"
+                "file_type": file_type,
+                "filename": full_path,
                 "url": blob.public_url
             })
-            
+
             images.append(meta)
-        
-        # unique_id 기준 내림차순 정렬
+
         images.sort(key=lambda x: int(x.get("unique_id", 0) or 0), reverse=True)
-        
         return render_template('index.html', images=images)
-        except Exception as e:
+
+    except Exception as e:
         print(f"Firebase 이미지 조회 오류: {e}")
         return render_template('index.html', images=[])
 
-        # ────────────────────────────────────────────
-        # djemals (관리자) 로그인/보호
-        # ────────────────────────────────────────────
 
-        def djemals_required(fn):
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if not session.get("is_djemals"):
-                    abort(401)
-                return fn(*args, **kwargs)
-            return wrapper
+# ────────────────────────────────────────────
+# djemals (관리자) 로그인/보호
+# ────────────────────────────────────────────
+def djemals_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_djemals"):
+            abort(401)
+        return fn(*args, **kwargs)
+    return wrapper
 
-        @app.get("/djemals/login")
-        def djemals_login_page():
-            return render_template("djemals_login.html")
+@app.get("/djemals/login")
+def djemals_login_page():
+    return render_template("djemals_login.html")
 
-        @app.post("/djemals/login")
-        def djemals_login():
-            pw = request.form.get("password", "")
-            pw_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
-            if (not pw_hash) or (not check_password_hash(pw_hash, pw)):
-                return "Unauthorized", 401
+@app.post("/djemals/login")
+def djemals_login():
+    pw = request.form.get("password", "")
+    pw_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
+    if (not pw_hash) or (not check_password_hash(pw_hash, pw)):
+        return "Unauthorized", 401
 
-            session["is_djemals"] = True
-            return redirect("/djemals")
+    session["is_djemals"] = True
+    return redirect("/djemals")
 
-        @app.post("/djemals/logout")
-        def djemals_logout():
-            session.clear()
-            return redirect("/djemals/login")
+@app.post("/djemals/logout")
+def djemals_logout():
+    session.clear()
+    return redirect("/djemals/login")
 
-        @app.get("/djemals")
-        @djemals_required
-        def djemals_home():
-            return render_template("djemals.html")
+@app.get("/djemals")
+@djemals_required
+def djemals_home():
+    return render_template("djemals.html")
 
-        @app.get("/djemals/ping")
-        def djemals_ping():
-            return "pong"
+@app.get("/djemals/ping")
+def djemals_ping():
+    return "pong"
 
-        @app.post("/api/track")
-        def track_event():
-            data = request.get_json()
+@app.post("/api/track")
+def track_event():
+    data = request.get_json() or {}
 
-            uuid = data.get("uuid")
-            event = data.get("event")
+    uuid = data.get("uuid")
+    event = data.get("event", "page_view")
 
-            if not uuid:
-                return jsonify({"error": "uuid required"}), 400
+    if not uuid:
+        return jsonify({"error": "uuid required"}), 400
 
-            today = get_kst_date()
+    today = get_kst_date()
+    doc_ref = db.collection("daily_stats").document(today)
+    doc = doc_ref.get()
 
-            doc_ref = db.collection("daily_stats").document(today)
+    if doc.exists:
+        stats = doc.to_dict()
+        views = stats.get("views", 0)
+        active = stats.get("active_uuids", [])
 
-            doc = doc_ref.get()
+        if event == "page_view":
+            views += 1
 
-            if doc.exists:
-                stats = doc.to_dict()
-                views = stats.get("views", 0)
-                active = stats.get("active_uuids", [])
+        if uuid not in active:
+            active.append(uuid)
+    else:
+        views = 1 if event == "page_view" else 0
+        active = [uuid]
 
-                if event == "page_view":
-                    views += 1
+    doc_ref.set({
+        "views": views,
+        "active_uuids": active,
+        "active_count": len(active),
+        "updated_at": firestore.SERVER_TIMESTAMP
+    })
 
-                if uuid not in active:
-                    active.append(uuid)
-            else:
-                views = 1 if event == "page_view" else 0
-                active = [uuid]
-
-            doc_ref.set({
-                "views": views,
-                "active_uuids": active,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
-
-            return jsonify({"ok": True})
+    return jsonify({"ok": True})
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
