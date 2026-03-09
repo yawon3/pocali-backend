@@ -2,22 +2,26 @@ import os
 import sqlite3
 import uuid
 import json
-import os
+
 from flask import Flask, g, request, jsonify, render_template, redirect, url_for, session, abort
 from functools import wraps
 from werkzeug.security import check_password_hash
 from flask_cors import CORS
+from datetime import datetime, timezone, timedelta
 
-
-
-
-# Firebase 관련 import
 import firebase_admin
-from firebase_admin import credentials, db as firebase_db, storage
+from firebase_admin import credentials, db as firebase_db, storage, firestore
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-key")
 CORS(app)  # Flask 앱 전체에 CORS 허용
+
+def get_kst_date():
+    kst = timezone(timedelta(hours=9))
+    return datetime.now(kst).strftime("%Y-%m-%d")
+
+# Firestore 초기화
+db = firestore.Client()
 
 # ────────────────────────────────────────────
 # Config
@@ -436,52 +440,87 @@ def index():
         images.sort(key=lambda x: int(x.get("unique_id", 0) or 0), reverse=True)
         
         return render_template('index.html', images=images)
-    except Exception as e:
+        except Exception as e:
         print(f"Firebase 이미지 조회 오류: {e}")
         return render_template('index.html', images=[])
 
         # ────────────────────────────────────────────
-# djemals (관리자) 로그인/보호
-# ────────────────────────────────────────────
-from functools import wraps
-from werkzeug.security import check_password_hash
-from flask import abort
+        # djemals (관리자) 로그인/보호
+        # ────────────────────────────────────────────
 
-def djemals_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not session.get("is_djemals"):
-            abort(401)
-        return fn(*args, **kwargs)
-    return wrapper
+        def djemals_required(fn):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if not session.get("is_djemals"):
+                    abort(401)
+                return fn(*args, **kwargs)
+            return wrapper
 
-@app.get("/djemals/login")
-def djemals_login_page():
-    return render_template("djemals_login.html")
+        @app.get("/djemals/login")
+        def djemals_login_page():
+            return render_template("djemals_login.html")
 
-@app.post("/djemals/login")
-def djemals_login():
-    pw = request.form.get("password", "")
-    pw_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
-    if (not pw_hash) or (not check_password_hash(pw_hash, pw)):
-        return "Unauthorized", 401
+        @app.post("/djemals/login")
+        def djemals_login():
+            pw = request.form.get("password", "")
+            pw_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
+            if (not pw_hash) or (not check_password_hash(pw_hash, pw)):
+                return "Unauthorized", 401
 
-    session["is_djemals"] = True
-    return redirect("/djemals")
+            session["is_djemals"] = True
+            return redirect("/djemals")
 
-@app.post("/djemals/logout")
-def djemals_logout():
-    session.clear()
-    return redirect("/djemals/login")
+        @app.post("/djemals/logout")
+        def djemals_logout():
+            session.clear()
+            return redirect("/djemals/login")
 
-@app.get("/djemals")
-@djemals_required
-def djemals_home():
-    return render_template("djemals.html")
+        @app.get("/djemals")
+        @djemals_required
+        def djemals_home():
+            return render_template("djemals.html")
 
-@app.get("/djemals/ping")
-def djemals_ping():
-    return "pong"
+        @app.get("/djemals/ping")
+        def djemals_ping():
+            return "pong"
+
+        @app.post("/api/track")
+        def track_event():
+            data = request.get_json()
+
+            uuid = data.get("uuid")
+            event = data.get("event")
+
+            if not uuid:
+                return jsonify({"error": "uuid required"}), 400
+
+            today = get_kst_date()
+
+            doc_ref = db.collection("daily_stats").document(today)
+
+            doc = doc_ref.get()
+
+            if doc.exists:
+                stats = doc.to_dict()
+                views = stats.get("views", 0)
+                active = stats.get("active_uuids", [])
+
+                if event == "page_view":
+                    views += 1
+
+                if uuid not in active:
+                    active.append(uuid)
+            else:
+                views = 1 if event == "page_view" else 0
+                active = [uuid]
+
+            doc_ref.set({
+                "views": views,
+                "active_uuids": active,
+                "updated_at": firestore.SERVER_TIMESTAMP
+            })
+
+            return jsonify({"ok": True})
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
