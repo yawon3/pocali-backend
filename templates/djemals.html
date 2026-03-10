@@ -155,6 +155,17 @@
     .preview-btn{
       background:#f3f3f3;
     }
+    #img-results{
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));
+      gap:16px;
+      justify-content:center;
+    }
+
+    .admin-card{
+      max-width:200px;
+      margin:auto;
+    }
 
 
   </style>
@@ -190,7 +201,7 @@
         <canvas id="statsChart"></canvas>
       </div>
     </div>
-  </div>
+  
 
     <div class="chart-card">
     <div class="chart-title">포카 관리자</div>
@@ -199,28 +210,26 @@
       <input id="img-query" type="text" placeholder="유진 / ARENA / 533135 / event 등 검색"
         style="padding:10px 12px; border:1px solid #ddd; border-radius:10px; min-width:280px;">
       
-      <select id="img-file-type" style="padding:10px 12px; border:1px solid #ddd; border-radius:10px;">
-        <option value="">전체 타입</option>
-        <option value="event">event</option>
-        <option value="benefit">benefit</option>
-        <option value="album">album</option>
-        <option value="md">md</option>
-        <option value="magazine">magazine</option>
-        <option value="ad">ad</option>
-        <option value="fansign">fansign</option>
-        <option value="broadcast">broadcast</option>
-      </select>
+    <select id="img-file-type" style="padding:10px 12px; border:1px solid #ddd; border-radius:10px;">
+      <option value="">전체 타입</option>
+      <option value="event">event</option>
+      <option value="benefit">benefit</option>
+      <option value="album">album</option>
+      <option value="etc">etc</option>
+    </select>
 
       <button id="img-search-btn">검색</button>
-    </div>
+      <button id="recent-btn">최근 50개</button>
 
+    </div>
+      
     <div id="img-results" style="
       display:grid;
       grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));
       gap:16px;
     "></div>
   </div>
-
+</div>
   <script>
     let statsChart = null;
     let currentDays = 7;
@@ -388,13 +397,47 @@
     }
 
 
-    document.getElementById('img-search-btn')
-    .addEventListener('click',loadAdminImages)
+      document.getElementById('img-search-btn')
+      .addEventListener('click',loadAdminImages)
 
-    document.getElementById('img-query')
-    .addEventListener('keydown',e=>{
-      if(e.key==='Enter') loadAdminImages()
-    })
+      document.getElementById('img-query')
+      .addEventListener('keydown',e=>{
+        if(e.key==='Enter') loadAdminImages()
+      })
+      document.getElementById('recent-btn')
+    .addEventListener('click', async () => {
+
+      const box = document.getElementById('img-results');
+      box.innerHTML = '불러오는 중...';
+
+      const res = await fetch('/djemals/api/images?limit=50', {
+        credentials: 'same-origin'
+      });
+
+      const data = await res.json();
+      const items = data.items || [];
+
+      if (!items.length) {
+        box.innerHTML = '최근 이미지가 없습니다.';
+        return;
+      }
+
+      box.innerHTML = items.map(item => `
+        <div class="admin-card">
+          <img src="${item.url}" alt="${item.filename}">
+          <div class="admin-meta">
+            <div class="name">${item.filename}</div>
+            <div>ID: ${item.unique_id || '-'}</div>
+            <div class="admin-actions">
+              <button class="preview-btn"
+                onclick="window.open('${item.url}', '_blank')">미리보기</button>
+              <button class="delete-btn"
+                onclick="deleteAdminImage('${item.filename}')">삭제</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    });
   </script>
 </body>
 </html>
