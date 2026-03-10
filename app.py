@@ -560,7 +560,87 @@ def djemals_stats():
         "today_active": today_row["active_count"],
         "rows": rows
     })
+@app.get("/djemals/api/images")
+@djemals_required
+def djemals_list_images():
+    query = (request.args.get("query") or "").strip().lower()
+    file_type = (request.args.get("file_type") or "").strip().lower()
+    limit = request.args.get("limit", 50, type=int)
 
+    if limit < 1:
+        limit = 1
+    if limit > 200:
+        limit = 200
+
+    items = []
+
+    try:
+        blobs = bucket.list_blobs(prefix="images/")
+
+        for blob in blobs:
+            name_lower = blob.name.lower()
+
+            if not any(name_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
+                continue
+
+            if file_type and not name_lower.startswith(f"images/{file_type}/"):
+                continue
+
+            if query and query not in name_lower:
+                continue
+
+            try:
+                _, full_path = blob.name.split("/", 1)   # images/event/xxx.jpg -> event/xxx.jpg
+            except ValueError:
+                full_path = blob.name
+
+            if "/" in full_path:
+                real_file_type, filename = full_path.split("/", 1)
+            else:
+                real_file_type, filename = "unknown", full_path
+
+            meta = parse_filename(filename) or {}
+            meta.update({
+                "file_type": real_file_type,
+                "filename": full_path,
+                "url": blob.public_url,
+                "blob_name": blob.name
+            })
+
+            items.append(meta)
+
+            if len(items) >= limit:
+                break
+
+        return jsonify({"items": items})
+
+    except Exception as e:
+        print(f"djemals image search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.delete("/djemals/api/images")
+@djemals_required
+def djemals_delete_image():
+    data = request.get_json() or {}
+    filename = (data.get("filename") or "").strip()
+
+    if not filename:
+        return jsonify({"error": "filename required"}), 400
+
+    blob_name = filename if filename.startswith("images/") else f"images/{filename}"
+
+    try:
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            return jsonify({"error": "file not found"}), 404
+
+        blob.delete()
+        return jsonify({"ok": True, "deleted": blob_name})
+
+    except Exception as e:
+        print(f"djemals image delete error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
