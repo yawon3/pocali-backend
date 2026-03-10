@@ -521,7 +521,45 @@ def track_event():
 
     return jsonify({"ok": True})
 
+@app.get("/djemals/api/stats")
+@djemals_required
+def djemals_stats():
+    days = request.args.get("days", 30, type=int)
+    if days < 1:
+        days = 1
+    if days > 365:
+        days = 365
 
+    kst = timezone(timedelta(hours=9))
+    today = datetime.now(kst).date()
+
+    rows = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        doc_id = d.strftime("%Y-%m-%d")
+        doc = db.collection("daily_stats").document(doc_id).get()
+
+        if doc.exists:
+            data = doc.to_dict() or {}
+            rows.append({
+                "date": doc_id,
+                "views": data.get("views", 0),
+                "active_count": data.get("active_count", 0),
+            })
+        else:
+            rows.append({
+                "date": doc_id,
+                "views": 0,
+                "active_count": 0,
+            })
+
+    today_row = rows[-1] if rows else {"views": 0, "active_count": 0}
+
+    return jsonify({
+        "today_views": today_row["views"],
+        "today_active": today_row["active_count"],
+        "rows": rows
+    })
 
 
 # ────────────────────────────────────────────

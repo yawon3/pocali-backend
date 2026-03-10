@@ -1,17 +1,211 @@
 <!doctype html>
-<html>
+<html lang="ko">
 <head>
   <meta charset="utf-8" />
   <title>djemals</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{
+      font-family: system-ui, sans-serif;
+      margin:0;
+      background:#f7f7fb;
+      color:#222;
+    }
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      padding:24px;
+    }
+    .topbar{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:20px;
+    }
+    h1{
+      margin:0;
+      font-size:28px;
+    }
+    .logout-form button{
+      border:none;
+      background:#111;
+      color:#fff;
+      padding:10px 14px;
+      border-radius:10px;
+      cursor:pointer;
+    }
+    .cards{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(220px, 1fr));
+      gap:16px;
+      margin-bottom:24px;
+    }
+    .card{
+      background:#fff;
+      border-radius:16px;
+      padding:20px;
+      box-shadow:0 4px 18px rgba(0,0,0,0.06);
+    }
+    .label{
+      font-size:14px;
+      color:#666;
+      margin-bottom:8px;
+    }
+    .value{
+      font-size:32px;
+      font-weight:800;
+    }
+    .charts{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:20px;
+    }
+    .chart-card{
+      background:#fff;
+      border-radius:16px;
+      padding:20px;
+      box-shadow:0 4px 18px rgba(0,0,0,0.06);
+    }
+    .chart-title{
+      font-size:18px;
+      font-weight:700;
+      margin-bottom:14px;
+    }
+    .toolbar{
+      display:flex;
+      gap:8px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+    .toolbar button{
+      border:1px solid #ddd;
+      background:#fff;
+      padding:8px 12px;
+      border-radius:999px;
+      cursor:pointer;
+    }
+    .toolbar button.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+    canvas{
+      max-height:380px;
+    }
+  </style>
 </head>
-<body style="font-family:system-ui;padding:16px;">
-  <h1>djemals</h1>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>djemals</h1>
+      <form class="logout-form" method="post" action="/djemals/logout">
+        <button type="submit">로그아웃</button>
+      </form>
+    </div>
 
-  <form method="post" action="/djemals/logout">
-    <button type="submit">Logout</button>
-  </form>
+    <div class="cards">
+      <div class="card">
+        <div class="label">오늘 방문자</div>
+        <div class="value" id="today-active">-</div>
+      </div>
+      <div class="card">
+        <div class="label">오늘 페이지뷰</div>
+        <div class="value" id="today-views">-</div>
+      </div>
+    </div>
 
-  <hr/>
-  <p>관리자 페이지 뼈대 완성. (다음 단계: 통계/이미지관리 붙이기)</p>
+    <div class="charts">
+      <div class="chart-card">
+        <div class="chart-title">방문 통계</div>
+        <div class="toolbar">
+          <button class="range-btn active" data-days="7">7일</button>
+          <button class="range-btn" data-days="30">30일</button>
+          <button class="range-btn" data-days="90">90일</button>
+        </div>
+        <canvas id="statsChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let statsChart = null;
+    let currentDays = 7;
+
+    async function loadStats(days = 7) {
+      const res = await fetch(`/djemals/api/stats?days=${days}`, {
+        credentials: 'same-origin'
+      });
+      if (!res.ok) {
+        alert('통계 데이터를 불러오지 못했습니다.');
+        return;
+      }
+
+      const data = await res.json();
+
+      document.getElementById('today-active').textContent = data.today_active ?? 0;
+      document.getElementById('today-views').textContent = data.today_views ?? 0;
+
+      const labels = data.rows.map(row => row.date.slice(5));
+      const activeData = data.rows.map(row => row.active_count);
+      const viewData = data.rows.map(row => row.views);
+
+      const ctx = document.getElementById('statsChart').getContext('2d');
+
+      if (statsChart) {
+        statsChart.destroy();
+      }
+
+      statsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: '활성 유저',
+              data: activeData,
+              borderWidth: 2,
+              tension: 0.25
+            },
+            {
+              label: '페이지뷰',
+              data: viewData,
+              borderWidth: 2,
+              tension: 0.25
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false
+          },
+          plugins: {
+            legend: {
+              position: 'top'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    document.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentDays = Number(btn.dataset.days);
+        await loadStats(currentDays);
+      });
+    });
+
+    loadStats(currentDays);
+  </script>
 </body>
 </html>
