@@ -477,7 +477,7 @@ def djemals_home():
 
 @app.get("/djemals/ping")
 def djemals_ping():
-    return "pong"
+    return "pongpong"
 
     
 
