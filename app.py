@@ -20,9 +20,6 @@ def get_kst_date():
     kst = timezone(timedelta(hours=9))
     return datetime.now(kst).strftime("%Y-%m-%d")
 
-# Firestore 초기화
-db = firestore.client()
-
 # ────────────────────────────────────────────
 # Config
 # ────────────────────────────────────────────
@@ -62,6 +59,7 @@ def init_firebase():
 
 # Firebase 초기화 실행 - 전역 변수로 버킷 저장
 bucket = init_firebase()
+db = firestore.client()
 
 # ────────────────────────────────────────────
 # DB helpers (SQLite 백업용으로 유지)
@@ -479,17 +477,9 @@ def djemals_home():
 def djemals_ping():
     return "pongpong"
 
-    
-
 @app.get("/zzztest")
 def zzztest():
-return "zzz ok"
-
-@app.route("/api/track", methods=["GET", "POST"])
-def track_event():
-    return jsonify({"ok": True, "route": "track alive"})
-
-
+    return "zzz ok"
 
 @app.route("/api/track", methods=["GET", "POST"])
 def track_event():
@@ -529,44 +519,10 @@ def track_event():
         "updated_at": firestore.SERVER_TIMESTAMP
     })
 
-    return jsonify({"ok": True})  
-
-@app.post("/api/track")
-def track_event():
-    data = request.get_json() or {}
-
-    uuid = data.get("uuid")
-    event = data.get("event", "page_view")
-
-    if not uuid:
-        return jsonify({"error": "uuid required"}), 400
-
-    today = get_kst_date()
-    doc_ref = db.collection("daily_stats").document(today)
-    doc = doc_ref.get()
-
-    if doc.exists:
-        stats = doc.to_dict()
-        views = stats.get("views", 0)
-        active = stats.get("active_uuids", [])
-
-        if event == "page_view":
-            views += 1
-
-        if uuid not in active:
-            active.append(uuid)
-    else:
-        views = 1 if event == "page_view" else 0
-        active = [uuid]
-
-    doc_ref.set({
-        "views": views,
-        "active_uuids": active,
-        "active_count": len(active),
-        "updated_at": firestore.SERVER_TIMESTAMP
-    })
-
     return jsonify({"ok": True})
+
+
+
 
 # ────────────────────────────────────────────
 # Helper – 파일명 파싱
