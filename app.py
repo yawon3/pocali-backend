@@ -604,13 +604,14 @@ def djemals_list_images():
                 "file_type": real_file_type,
                 "filename": full_path,
                 "url": blob.public_url,
-                "blob_name": blob.name
+                "blob_name": blob.name,
+                "updated": blob.updated.isoformat() if blob.updated else ""
             })
 
             items.append(meta)
+            items.sort(key=lambda x: x.get("updated", ""), reverse=True)
+            items = items[:limit]
 
-            if len(items) >= limit:
-                break
 
         return jsonify({"items": items})
 
